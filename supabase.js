@@ -8,7 +8,7 @@
   const client = window.supabase.createClient(URL, KEY, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   });
-  let user = null, syncing = false, timer = 0, lastSyncError = '', localChangeVersion = 0, syncQueued = false;
+  let user = null, syncing = false, timer = 0, lastSyncError = '', localChangeVersion = 0, syncQueued = false, refreshQueued = false, realtimeChannel = null;
   const localKey = () => user ? `starwish_cloud_meta_${user.id}` : '';
   const readMeta = () => { try { return JSON.parse(localStorage.getItem(localKey()) || '{}'); } catch { return {}; } };
   const writeMeta = value => localStorage.setItem(localKey(), JSON.stringify(value));
@@ -75,10 +75,10 @@
     const {error:se}=await client.from('starwish_settings').upsert(settings,{onConflict:'user_id'});if(se)throw se;
     await savePrefs({...state.preferences,deleted_call_ids:tombstones.calls,deleted_diary_ids:tombstones.diaries,calendar_month:state.month},state.view);
   }
-  async function syncNow(isInitial=false) {
+  async function syncNow(isInitial=false,pullOnly=false) {
     if(!user)return;
-    if(syncing){syncQueued=true;return;}
-    syncing=true;const syncVersion=localChangeVersion;status('正在安全同步…');
+    if(syncing){if(pullOnly)refreshQueued=true;else syncQueued=true;return;}
+    syncing=true;const syncVersion=localChangeVersion;if(!pullOnly)status('正在安全同步…');
     try{
       const [callRows,diaryRows,settingsResp,prefsResp]=await Promise.all([
         allRows('starwish_calls'),allRows('starwish_diary'),
@@ -105,17 +105,24 @@
       const localSettingsDirty=!!state.data.settings_dirty;
       const localSettingsNewer=localSettingsDirty||(state.data.updated_at&&settings?.updated_at&&Date.parse(state.data.updated_at)>Date.parse(settings.updated_at));
       if(localChangeVersion!==syncVersion){syncQueued=true;return;}
-      window.starwishApp.applyCloudState({calls:mergedCalls,diaries:mergedDiaries,rate:localSettingsNewer||!settings?state.data.rate:Number(settings.rate_usd),fx:localSettingsNewer||!settings?state.data.fx:Number(settings.exchange_rate),settingsUpdatedAt:localSettingsNewer?state.data.updated_at:settings?.updated_at,settingsDirty:localSettingsDirty,preferences:remotePrefs,view:prefsResp.data?.preferred_view||state.view,month:remotePrefs.calendar_month||state.month});
-      await uploadState(window.starwishApp.getState(),tomb);
-      // Clear the dirty marker only if no newer local change happened while uploading.
-      if(localSettingsDirty&&localChangeVersion===syncVersion)window.starwishApp.markSettingsSynced();
-      writeMeta({...tomb,migrated:true,last_sync:new Date().toISOString()});
-      localStorage.removeItem('starwish_pending_deletes');
-      status(`已同步到云端 · ${user.email}`); lastSyncError='';
+      const nextRate=localSettingsNewer||!settings?state.data.rate:Number(settings.rate_usd),nextFx=localSettingsNewer||!settings?state.data.fx:Number(settings.exchange_rate);
+      const sameCalls=mergedCalls.length===state.data.calls.length&&mergedCalls.every(c=>{const x=state.data.calls.find(y=>y.id===c.id);return x&&['day','time','minutes','usd','rm','note','updated_at'].every(k=>String(x[k]??'')===String(c[k]??''));});
+      const sameDiaries=mergedDiaries.length===state.diaries.length&&mergedDiaries.every(d=>{const x=state.diaries.find(y=>y.id===d.id);return x&&['entryDay','kind','note','updated_at'].every(k=>String(x[k]??'')===String(d[k]??''));});
+      const nextView=prefsResp.data?.preferred_view||state.view,nextMonth=remotePrefs.calendar_month||state.month;
+      if(pullOnly&&sameCalls&&sameDiaries&&Number(nextRate)===Number(state.data.rate)&&Number(nextFx)===Number(state.data.fx)&&nextView===state.view&&nextMonth===state.month){window.starwishApp.setCloudPreferences(remotePrefs);return;}
+      window.starwishApp.applyCloudState({calls:mergedCalls,diaries:mergedDiaries,rate:nextRate,fx:nextFx,settingsUpdatedAt:localSettingsNewer?state.data.updated_at:settings?.updated_at,settingsDirty:localSettingsDirty,preferences:remotePrefs,view:nextView,month:nextMonth});
+      if(!pullOnly){
+        await uploadState(window.starwishApp.getState(),tomb);
+        // Clear the dirty marker only if no newer local change happened while uploading.
+        if(localSettingsDirty&&localChangeVersion===syncVersion)window.starwishApp.markSettingsSynced();
+        writeMeta({...tomb,migrated:true,last_sync:new Date().toISOString()});
+        localStorage.removeItem('starwish_pending_deletes');
+        status(`已同步到云端 · ${user.email}`); lastSyncError='';
+      }else{status(`已从云端更新 · ${user.email}`);}
     }catch(err){
       console.error('Starwish sync failed',err); lastSyncError=err.message||String(err);
       status(`云端保存失败：${lastSyncError}。本机副本仍保留，请检查网络后点“立即同步”。`,true);
-    }finally{syncing=false;if(syncQueued&&user){syncQueued=false;clearTimeout(timer);timer=setTimeout(()=>syncNow(!readMeta().migrated),100);}}
+    }finally{syncing=false;if((syncQueued||refreshQueued)&&user){const upload=syncQueued;syncQueued=false;refreshQueued=false;clearTimeout(timer);timer=setTimeout(()=>syncNow(!readMeta().migrated,!upload),150);}}
   }
   function queueSync(){localChangeVersion++;syncQueued=true;clearTimeout(timer);timer=setTimeout(()=>{if(syncing)return;syncQueued=false;syncNow(!readMeta().migrated);},350);}
   async function deleteCloud(type,id){
@@ -124,8 +131,21 @@
     try{const table=type==='call'?'starwish_calls':'starwish_diary';const {error}=await client.from(table).delete().eq('id',cloudId).eq('user_id',user.id);if(error)throw error;writeMeta({...meta,[key]:tomb});await savePrefs({...window.starwishApp.getState().preferences,[key]:tomb},window.starwishApp.getState().view);status(`已同步删除 · ${user.email}`);}
     catch(err){writeMeta({...meta,[key]:tomb});status(`删除尚未同步：${err.message||err}。本机已删除，请稍后点“立即同步”。`,true);}
   }
+  function watchCloudChanges(){
+    if(realtimeChannel){client.removeChannel(realtimeChannel);realtimeChannel=null;}
+    if(!user)return;
+    const uid=user.id;
+    realtimeChannel=client.channel(`starwish-cloud-${uid}`)
+      .on('postgres_changes',{event:'*',schema:'public',table:'starwish_calls',filter:`user_id=eq.${uid}`},()=>syncNow(false,true))
+      .on('postgres_changes',{event:'*',schema:'public',table:'starwish_diary',filter:`user_id=eq.${uid}`},()=>syncNow(false,true))
+      .on('postgres_changes',{event:'*',schema:'public',table:'starwish_settings',filter:`user_id=eq.${uid}`},()=>syncNow(false,true))
+      .on('postgres_changes',{event:'*',schema:'public',table:'starwish_jar_preferences',filter:`user_id=eq.${uid}`},()=>syncNow(false,true))
+      .subscribe();
+  }
   function setAuthState(session){
+    const previousUserId=user?.id||null;
     user=session?.user||null;
+    if(previousUserId!==(user?.id||null))watchCloudChanges();
     $('accountToggle').textContent=user?'☁️ 账户':'☁️ 登录/注册';
     $('authControls').classList.toggle('hidden',!!user);$('signedInControls').classList.toggle('hidden',!user);
     if(user){$('signedInEmail').textContent=user.email||'已登录';status('已登录，正在载入云端数据…');syncNow(!readMeta().migrated);}
@@ -151,6 +171,8 @@
   document.addEventListener('starwish:deletecall',e=>deleteCloud('call',e.detail.id));
   document.addEventListener('starwish:deletediary',e=>deleteCloud('diary',e.detail.id));
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&user)syncNow(false);});
+  // Realtime pushes changes; polling also covers projects where table replication isn't enabled.
+  setInterval(()=>{if(user&&!document.hidden)syncNow(false,true);},15000);
   client.auth.getSession().then(({data,error})=>{if(error){status(`登录状态读取失败：${error.message}`,true);return;}setAuthState(data.session);});
   client.auth.onAuthStateChange((_event,session)=>setAuthState(session));
 })();
