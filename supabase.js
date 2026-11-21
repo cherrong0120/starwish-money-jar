@@ -8,7 +8,7 @@
   const client = window.supabase.createClient(URL, KEY, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   });
-  let user = null, syncing = false, timer = 0, lastSyncError = '';
+  let user = null, syncing = false, timer = 0, lastSyncError = '', localChangeVersion = 0, syncQueued = false;
   const localKey = () => user ? `starwish_cloud_meta_${user.id}` : '';
   const readMeta = () => { try { return JSON.parse(localStorage.getItem(localKey()) || '{}'); } catch { return {}; } };
   const writeMeta = value => localStorage.setItem(localKey(), JSON.stringify(value));
@@ -76,8 +76,9 @@
     await savePrefs({...state.preferences,deleted_call_ids:tombstones.calls,deleted_diary_ids:tombstones.diaries,calendar_month:state.month},state.view);
   }
   async function syncNow(isInitial=false) {
-    if(!user||syncing)return;
-    syncing=true;status('正在安全同步…');
+    if(!user)return;
+    if(syncing){syncQueued=true;return;}
+    syncing=true;const syncVersion=localChangeVersion;status('正在安全同步…');
     try{
       const [callRows,diaryRows,settingsResp,prefsResp]=await Promise.all([
         allRows('starwish_calls'),allRows('starwish_diary'),
@@ -100,6 +101,7 @@
       const mergedCalls=[...cm.values()],mergedDiaries=[...dm.values()];
       const settings=settingsResp.data;
       const localSettingsNewer=state.data.updated_at&&settings?.updated_at&&Date.parse(state.data.updated_at)>Date.parse(settings.updated_at);
+      if(localChangeVersion!==syncVersion){syncQueued=true;return;}
       window.starwishApp.applyCloudState({calls:mergedCalls,diaries:mergedDiaries,rate:localSettingsNewer||!settings?state.data.rate:Number(settings.rate_usd),fx:localSettingsNewer||!settings?state.data.fx:Number(settings.exchange_rate),settingsUpdatedAt:localSettingsNewer?state.data.updated_at:settings?.updated_at,preferences:remotePrefs,view:prefsResp.data?.preferred_view||state.view,month:remotePrefs.calendar_month||state.month});
       await uploadState(window.starwishApp.getState(),tomb);
       writeMeta({...tomb,migrated:true,last_sync:new Date().toISOString()});
@@ -108,9 +110,9 @@
     }catch(err){
       console.error('Starwish sync failed',err); lastSyncError=err.message||String(err);
       status(`云端保存失败：${lastSyncError}。本机副本仍保留，请检查网络后点“立即同步”。`,true);
-    }finally{syncing=false;}
+    }finally{syncing=false;if(syncQueued&&user){syncQueued=false;clearTimeout(timer);timer=setTimeout(()=>syncNow(!readMeta().migrated),100);}}
   }
-  function queueSync(){clearTimeout(timer);timer=setTimeout(()=>syncNow(!readMeta().migrated),350);}
+  function queueSync(){localChangeVersion++;syncQueued=true;clearTimeout(timer);timer=setTimeout(()=>{if(syncing)return;syncQueued=false;syncNow(!readMeta().migrated);},350);}
   async function deleteCloud(type,id){
     if(!user){const pending=JSON.parse(localStorage.getItem('starwish_pending_deletes')||'{"calls":[],"diaries":[]}');const list=type==='call'?pending.calls:pending.diaries;if(!list.includes(id))list.push(id);localStorage.setItem('starwish_pending_deletes',JSON.stringify(pending));status('删除会在下次登录后同步到云端。');return;}
     const cloudId=await idFor(user.id,type,id),key=type==='call'?'deleted_call_ids':'deleted_diary_ids',meta=readMeta(),tomb=[...new Set([...(meta[key]||[]),cloudId])];
