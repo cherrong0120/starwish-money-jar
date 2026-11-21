@@ -119,10 +119,14 @@
   }
   function setAuthState(session){
     user=session?.user||null;
+    $('accountToggle').textContent=user?'☁️ 账户':'☁️ 登录/注册';
     $('authControls').classList.toggle('hidden',!!user);$('signedInControls').classList.toggle('hidden',!user);
     if(user){$('signedInEmail').textContent=user.email||'已登录';status('已登录，正在载入云端数据…');syncNow(!readMeta().migrated);}
     else status('未登录：数据仅保存在本机。登录后可跨设备同步。');
   }
+  $('accountToggle').onclick=()=>{const open=$('cloudAccount').classList.contains('hidden');$('cloudAccount').classList.toggle('hidden',!open);$('accountToggle').setAttribute('aria-expanded',String(open));if(open&&!user)setTimeout(()=>$('authEmail').focus(),0);};
+  document.addEventListener('click',e=>{if(!$('cloudAccount').contains(e.target)&&!$('accountToggle').contains(e.target)){$('cloudAccount').classList.add('hidden');$('accountToggle').setAttribute('aria-expanded','false');}});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('cloudAccount').classList.contains('hidden')){$('cloudAccount').classList.add('hidden');$('accountToggle').setAttribute('aria-expanded','false');$('accountToggle').focus();}});
   $('signUp').onclick=async()=>{
     const email=$('authEmail').value.trim(),password=$('authPassword').value;
     if(!email||password.length<8)return toast('请输入有效邮箱和至少 8 位密码');

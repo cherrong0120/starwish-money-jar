@@ -1,0 +1,25 @@
+{
+  "id": "./",
+  "name": "我的星愿存钱罐",
+  "short_name": "星愿存钱罐",
+  "description": "记录每天的电话收入，点亮闪亮的爱心金币。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fff8fd",
+  "theme_color": "#f8eaf0",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
