@@ -100,10 +100,15 @@
       for(const d of state.diaries){const id=await idFor(user.id,'diary',String(d.id)),remote=dm.get(id);if(!tomb.diaries.includes(id)&&(!remote||Date.parse(d.updated_at||0)>Date.parse(remote.updated_at||0)))dm.set(id,{...d,id});}
       const mergedCalls=[...cm.values()],mergedDiaries=[...dm.values()];
       const settings=settingsResp.data;
-      const localSettingsNewer=state.data.updated_at&&settings?.updated_at&&Date.parse(state.data.updated_at)>Date.parse(settings.updated_at);
+      // A deliberate local settings save wins until its cloud upsert succeeds.
+      // This avoids relying on the user's device clock versus Supabase's clock.
+      const localSettingsDirty=!!state.data.settings_dirty;
+      const localSettingsNewer=localSettingsDirty||(state.data.updated_at&&settings?.updated_at&&Date.parse(state.data.updated_at)>Date.parse(settings.updated_at));
       if(localChangeVersion!==syncVersion){syncQueued=true;return;}
-      window.starwishApp.applyCloudState({calls:mergedCalls,diaries:mergedDiaries,rate:localSettingsNewer||!settings?state.data.rate:Number(settings.rate_usd),fx:localSettingsNewer||!settings?state.data.fx:Number(settings.exchange_rate),settingsUpdatedAt:localSettingsNewer?state.data.updated_at:settings?.updated_at,preferences:remotePrefs,view:prefsResp.data?.preferred_view||state.view,month:remotePrefs.calendar_month||state.month});
+      window.starwishApp.applyCloudState({calls:mergedCalls,diaries:mergedDiaries,rate:localSettingsNewer||!settings?state.data.rate:Number(settings.rate_usd),fx:localSettingsNewer||!settings?state.data.fx:Number(settings.exchange_rate),settingsUpdatedAt:localSettingsNewer?state.data.updated_at:settings?.updated_at,settingsDirty:localSettingsDirty,preferences:remotePrefs,view:prefsResp.data?.preferred_view||state.view,month:remotePrefs.calendar_month||state.month});
       await uploadState(window.starwishApp.getState(),tomb);
+      // Clear the dirty marker only if no newer local change happened while uploading.
+      if(localSettingsDirty&&localChangeVersion===syncVersion)window.starwishApp.markSettingsSynced();
       writeMeta({...tomb,migrated:true,last_sync:new Date().toISOString()});
       localStorage.removeItem('starwish_pending_deletes');
       status(`已同步到云端 · ${user.email}`); lastSyncError='';
