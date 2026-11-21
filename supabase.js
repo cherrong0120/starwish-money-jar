@@ -142,8 +142,6 @@
   };
   $('signOut').onclick=async()=>{const {error}=await client.auth.signOut();if(error)toast(`退出失败：${error.message}`);else setAuthState(null);};
   $('syncNow').onclick=()=>syncNow(!readMeta().migrated);
-  $('exportCloud').onclick=()=>window.starwishApp.exportBackup();
-  $('importCloud').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const obj=JSON.parse(await f.text());if(!Array.isArray(obj.calls)||obj.calls.some(c=>!window.starwishApp.validCall(c)))throw Error('备份文件格式不正确');if(!confirm('导入后会合并云端记录；相同 ID 会自动跳过。继续吗？'))return;const s=window.starwishApp.getState();s.data={calls:obj.calls,rate:Number(obj.rate)>0?Number(obj.rate):.35,fx:Number(obj.fx)>0?Number(obj.fx):4.4};s.diaries=Array.isArray(obj.diaries)?obj.diaries.filter(d=>d&&typeof d.note==='string'):s.diaries;window.starwishApp.applyLocalState(s);if(user)await syncNow(false);toast('备份已导入并合并；请检查同步状态。');}catch(err){toast(`导入失败：${err.message}`);}finally{e.target.value='';}};
   document.addEventListener('starwish:localchange',queueSync);
   document.addEventListener('starwish:deletecall',e=>deleteCloud('call',e.detail.id));
   document.addEventListener('starwish:deletediary',e=>deleteCloud('diary',e.detail.id));
