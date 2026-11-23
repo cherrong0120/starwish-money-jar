@@ -8,10 +8,13 @@
   const stable = v => Array.isArray(v)?`[${v.map(stable).join(',')}]`:v&&typeof v==='object'?`{${Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stable(v[k])).join(',')}}`:JSON.stringify(v);
   function mergePreferences(local={},remote={},localDirty=false){
     const first=localDirty?remote:local,second=localDirty?local:remote;
-    const mergeById=(a=[],b=[])=>{const m=new Map();for(const x of [...a,...b])if(x?.id)m.set(x.id,x);return [...m.values()];};
+    const deletedCompanyIds=[...new Set([...(local.deleted_company_ids||[]),...(remote.deleted_company_ids||[])])];
+    const mergeById=(a=[],b=[])=>{const m=new Map();for(const x of [...a,...b])if(x?.id&&!deletedCompanyIds.includes(x.id))m.set(x.id,x);return [...m.values()];};
     const daily={...(localDirty?(remote.availability?.daily||{}):(local.availability?.daily||{})),...(localDirty?(local.availability?.daily||{}):(remote.availability?.daily||{}))};
     const out={...local,...remote,...(localDirty?local:{})};
     out.company_profiles=mergeById(first.company_profiles||[],second.company_profiles||[]);
+    out.deleted_company_ids=deletedCompanyIds;
+    out.archived_company_names={...(localDirty?(remote.archived_company_names||{}):(local.archived_company_names||{})),...(localDirty?(local.archived_company_names||{}):(remote.archived_company_names||{}))};
     out.call_companies={...(localDirty?(remote.call_companies||{}):(local.call_companies||{})),...(localDirty?(local.call_companies||{}):(remote.call_companies||{}))};
     out.availability={...(local.availability||{}),...(remote.availability||{}),daily};
     out.deleted_call_ids=[...new Set([...(local.deleted_call_ids||[]),...(remote.deleted_call_ids||[])])];
@@ -125,7 +128,7 @@
       const sameCalls=mergedCalls.length===state.data.calls.length&&mergedCalls.every(c=>{const x=state.data.calls.find(y=>y.id===c.id);return x&&['day','time','minutes','usd','rm','note','companyId','updated_at'].every(k=>String(x[k]??'')===String(c[k]??''));});
       const sameDiaries=mergedDiaries.length===state.diaries.length&&mergedDiaries.every(d=>{const x=state.diaries.find(y=>y.id===d.id);return x&&['entryDay','kind','note','updated_at'].every(k=>String(x[k]??'')===String(d[k]??''));});
       const nextView=state.view,nextMonth=state.month;
-      const sameCompanyPreferences=['company_profiles','availability','call_companies','active_company'].every(k=>stable(effectivePreferences[k]??null)===stable(state.preferences[k]??null));
+      const sameCompanyPreferences=['company_profiles','deleted_company_ids','archived_company_names','availability','call_companies','active_company'].every(k=>stable(effectivePreferences[k]??null)===stable(state.preferences[k]??null));
       if(pullOnly&&sameCalls&&sameDiaries&&Number(nextRate)===Number(state.data.rate)&&Number(nextFx)===Number(state.data.fx)&&sameCompanyPreferences&&nextView===state.view&&nextMonth===state.month){window.starwishApp.setCloudPreferences(effectivePreferences);return;}
       window.starwishApp.applyCloudState({calls:mergedCalls,diaries:mergedDiaries,rate:nextRate,fx:nextFx,settingsUpdatedAt:localSettingsNewer?state.data.updated_at:settings?.updated_at,settingsDirty:localSettingsDirty,preferences:effectivePreferences,view:nextView,month:nextMonth});
       if(!pullOnly){

@@ -53,13 +53,14 @@
     }
     return prefs.company_profiles.filter(p=>p&&p.id&&p.name);
   }
-  function companyName(id) { return profiles().find(p=>p.id===id)?.name || (id?'已删除的公司':'未分类旧记录'); }
+  function companyName(id) { return profiles().find(p=>p.id===id)?.name || (id?(prefs.archived_company_names?.[id]||'已归档公司'):'未分类旧记录'); }
   window.starwishCompanyName = companyName;
   window.starwishEscapeHtml = escapeHtml;
   window.starwishMergePreferences = (local,incoming) => {
     const a=local||{},b=incoming||{};
-    const profs=new Map([...(a.company_profiles||[]),...(b.company_profiles||[])].map(p=>[p.id,p]));
-    return {...a,...b,preferences_dirty:true,company_profiles:[...profs.values()],call_companies:{...(a.call_companies||{}),...(b.call_companies||{})},availability:{...(a.availability||{}),...(b.availability||{}),daily:{...((a.availability||{}).daily||{}),...((b.availability||{}).daily||{})}}};
+    const deleted=[...new Set([...(a.deleted_company_ids||[]),...(b.deleted_company_ids||[])])];
+    const profs=new Map([...(a.company_profiles||[]),...(b.company_profiles||[])].filter(p=>p&&!deleted.includes(p.id)).map(p=>[p.id,p]));
+    return {...a,...b,preferences_dirty:true,deleted_company_ids:deleted,company_profiles:[...profs.values()],archived_company_names:{...(a.archived_company_names||{}),...(b.archived_company_names||{})},call_companies:{...(a.call_companies||{}),...(b.call_companies||{})},availability:{...(a.availability||{}),...(b.availability||{}),daily:{...((a.availability||{}).daily||{}),...((b.availability||{}).daily||{})}}};
   };
   window.starwishRateForEstimate = () => {
     const id=$('callCompanyId')?.value||prefs.active_company;
@@ -82,6 +83,13 @@
     .availability-summary{font-weight:800;color:#76536b;line-height:1.6}
     .availability-sub{color:#987e90;font-size:13px;line-height:1.6}
     .company-time{display:block;color:#987e90;font-size:12px;margin-top:3px}
+    .wrap{width:100%;max-width:1480px;padding-left:clamp(18px,3vw,46px);padding-right:clamp(18px,3vw,46px)}
+    .layout{grid-template-columns:minmax(0,1.35fr) minmax(380px,.65fr);gap:clamp(20px,2.5vw,38px)}
+    .company-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:10px}
+    .company-actions .btn{min-width:0;padding:11px 8px;line-height:1.3}
+    .btn.company-delete{background:#fff0f3;color:#b75e76}
+    .availability-panel{margin-top:18px}
+    @media(max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}.wrap{padding-left:18px;padding-right:18px}}
     @media(max-width:520px){.availability-box{padding:13px}.company-filter{margin-left:-3px;margin-right:-3px}}
   `;
   document.head.appendChild(styles);
@@ -95,32 +103,34 @@
     if(fields&&!$('companyProfileEditor')){
       const editor=document.createElement('div');
       editor.className='company-editor';editor.id='companyProfileEditor';
-      editor.innerHTML='<strong>🏷️ 公司费率</strong><label for="profileCompanySelect">正在编辑</label><select id="profileCompanySelect"></select><label for="profileCompanyName">公司名称</label><input id="profileCompanyName" maxlength="60" placeholder="例如 Lionbridge"><button type="button" class="btn secondary" id="addCompanyProfile" style="margin-top:10px">＋ 添加公司费率</button><p class="sectionnote">每条电话会记录当时选择的公司和费率；改费率不会重算旧记录。</p>';
+      editor.innerHTML='<strong>🏷️ 公司费率</strong><label for="profileCompanySelect">正在编辑</label><select id="profileCompanySelect"></select><label for="profileCompanyName">公司名称</label><input id="profileCompanyName" maxlength="60" placeholder="例如 Lionbridge"><div class="company-actions"><button type="button" class="btn secondary" id="addCompanyProfile">＋ 添加公司</button><button type="button" class="btn company-delete" id="deleteCompanyProfile">删除所选公司</button></div><p class="sectionnote">电话记录保留当时的公司和费率；删除只会归档公司，不会删除记录。</p>';
       fields.parentElement.insertBefore(editor,fields);
       const rateLabel=document.querySelector('label[for="rate"]');
       if(rateLabel) rateLabel.textContent='所选公司的每分钟费率（USD）';
       const saveButton=$('saveSettings');
       if(saveButton) saveButton.textContent='保存公司费率与参考汇率';
     }
-    const right=document.querySelector('.layout>section:last-child');
-    const callPanel=$('callForm')?.closest('.panel');
-    if(right&&callPanel&&!$('availabilityPanel')){
+    const calendarPanel=$('calendar')?.closest('.panel');
+    if(calendarPanel&&!$('availabilityPanel')){
       const box=document.createElement('div');box.className='panel';box.id='availabilityPanel';
-      box.innerHTML='<h2>⏱️ Lionbridge 上线时间</h2><div class="sectionnote">手动记录在线时长，和电话分钟数、收入分开计算。周一至周五目标 16 小时；每天基准 3 小时 12 分钟，前几天的结余会调整后续工作日目标。</div><div class="availability-tabs" role="group" aria-label="上线进度查看方式"><button type="button" id="availabilityDayTab" class="active">每日进度</button><button type="button" id="availabilityWeekTab">本周进度</button></div><label for="availabilityDate">记录日期</label><input id="availabilityDate" type="date"><div class="availability-inputs"><div><label for="availabilityHours">已上线小时</label><input id="availabilityHours" type="number" min="0" max="23" step="1" value="0" inputmode="numeric"></div><div><label for="availabilityMinutes">已上线分钟</label><input id="availabilityMinutes" type="number" min="0" max="59" step="1" value="0" inputmode="numeric"></div></div><button type="button" class="btn" id="saveAvailability" style="width:100%;margin-top:12px">保存上线时长</button><div class="availability-box" id="availabilityResult" aria-live="polite"></div>';
-      right.insertBefore(box,callPanel);
+      box.classList.add('availability-panel');
+      box.innerHTML='<h2>⏱️ Lionbridge 上线进度</h2><div class="sectionnote">工作日每天目标3小时12分钟，本周共16小时。超出时间抵扣后续工作日。</div><div class="availability-tabs" role="group" aria-label="上线进度查看方式"><button type="button" id="availabilityDayTab" class="active">每日</button><button type="button" id="availabilityWeekTab">本周</button></div><label for="availabilityDate">日期</label><input id="availabilityDate" type="date"><div class="availability-inputs"><div><label for="availabilityHours">小时</label><input id="availabilityHours" type="number" min="0" max="23" step="1" value="0" inputmode="numeric"></div><div><label for="availabilityMinutes">分钟</label><input id="availabilityMinutes" type="number" min="0" max="59" step="1" value="0" inputmode="numeric"></div></div><button type="button" class="btn" id="saveAvailability" style="width:100%;margin-top:12px">保存时长</button><div class="availability-box" id="availabilityResult" aria-live="polite"></div>';
+      calendarPanel.insertAdjacentElement('afterend',box);
     }
     const monthlyPanel=$('monthlyPanel');
     if(monthlyPanel) monthlyPanel.classList.add('hidden');
   }
 
   function renderProfiles(force=false) {
-    const hasLegacy=app.getState().data.calls.some(c=>!c.companyId);
+    const activeIds=new Set(profiles().map(p=>p.id));
+    const hasLegacy=app.getState().data.calls.some(c=>!c.companyId||!activeIds.has(c.companyId));
     const sig=JSON.stringify({profiles:profiles(),active:prefs.active_company,editor:prefs.profile_editor_company,hasLegacy});
     if(!force&&sig===renderedProfileSignature) return;
     renderedProfileSignature=sig;
     const callSelect=$('callCompanyId'),editSelect=$('profileCompanySelect');
     if(!callSelect||!editSelect) return;
     const list=profiles();
+    if($('deleteCompanyProfile')) $('deleteCompanyProfile').disabled=list.length<=1;
     const options=list.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} · US$ ${fmt(p.rateUsd)}/分钟</option>`).join('');
     callSelect.innerHTML=options;editSelect.innerHTML=options;
     if(!list.some(p=>p.id===prefs.active_company)) prefs.active_company=list[0]?.id||'';
@@ -131,7 +141,7 @@
     if(editorProfile){if(document.activeElement!==$('profileCompanyName'))$('profileCompanyName').value=editorProfile.name;if(document.activeElement!==$('rate'))$('rate').value=editorProfile.rateUsd;}
     const filter=$('companyFilter');
     if(filter){
-      const choices=[{id:'all',label:'全部公司'},...list.map(p=>({id:p.id,label:`${p.name} · US$${Number(p.rateUsd).toFixed(2)}`})),...(hasLegacy?[{id:'legacy',label:'未分类旧记录'}]:[])];
+      const choices=[{id:'all',label:'全部公司'},...list.map(p=>({id:p.id,label:`${p.name} · US$${Number(p.rateUsd).toFixed(2)}`})),...(hasLegacy?[{id:'legacy',label:'未分类 / 已归档'}]:[])];
       if(!choices.some(x=>x.id===activeFilter)) activeFilter='all';
       filter.innerHTML=choices.map(x=>`<button type="button" data-company-filter="${escapeHtml(x.id)}" class="${activeFilter===x.id?'active':''}">${escapeHtml(x.label)}</button>`).join('');
     }
@@ -141,7 +151,8 @@
     const calls=app.getState().data.calls;
     return calls.filter(c=>{
       const periodMatch=period==='day'?c.day===app.getState().selected:c.day?.slice(0,7)===app.getState().month;
-      const companyMatch=activeFilter==='all'||(activeFilter==='legacy'?!c.companyId:c.companyId===activeFilter);
+      const activeIds=new Set(profiles().map(p=>p.id));
+      const companyMatch=activeFilter==='all'||(activeFilter==='legacy'?(!c.companyId||!activeIds.has(c.companyId)):c.companyId===activeFilter);
       return periodMatch&&companyMatch;
     });
   }
@@ -207,13 +218,13 @@
     const startLabel=weekStartDay,endLabel=shiftDate(weekStartDay,4);
     if(availabilityMode==='week'){
       const remaining=Math.max(0,WEEKLY_TARGET-week),surplus=Math.max(0,week-WEEKLY_TARGET);
-      $('availabilityResult').innerHTML=`<div class="availability-summary">本周（${startLabel} 至 ${endLabel}）：${formatDuration(week)} / 16小时</div><div class="availability-bar"><span style="width:${pct.toFixed(1)}%"></span></div><div class="availability-sub">${remaining?`本周还差 ${formatDuration(remaining)}。`: `本周最低时长已完成${surplus?`，超出 ${formatDuration(surplus)}`:''}。`}</div>`;
+      $('availabilityResult').innerHTML=`<div class="availability-summary">本周 ${formatDuration(week)} / 16小时</div><div class="availability-bar"><span style="width:${pct.toFixed(1)}%"></span></div><div class="availability-sub">${remaining?`还差 ${formatDuration(remaining)}`:`已达标${surplus?` · 超出 ${formatDuration(surplus)}`:''}`}</div>`;
     }else if(weekday(day)===0||weekday(day)===6){
       const remaining=Math.max(0,WEEKLY_TARGET-week);
-      $('availabilityResult').innerHTML=`<div class="availability-summary">${day} 是周末，不计入周一至周五的16小时要求。</div><div class="availability-bar"><span style="width:${Math.min(100,week/WEEKLY_TARGET*100).toFixed(1)}%"></span></div><div class="availability-sub">本周已完成 ${formatDuration(week)}${remaining?`，还差 ${formatDuration(remaining)}`:'，周目标已完成'}。</div>`;
+      $('availabilityResult').innerHTML=`<div class="availability-summary">周末 · 本周 ${formatDuration(week)} / 16小时</div><div class="availability-bar"><span style="width:${Math.min(100,week/WEEKLY_TARGET*100).toFixed(1)}%"></span></div><div class="availability-sub">${remaining?`还差 ${formatDuration(remaining)}`:'周目标已完成'}</div>`;
     }else{
       const remaining=Math.max(0,target-done),surplus=Math.max(0,done-target);
-      $('availabilityResult').innerHTML=`<div class="availability-summary">${day}：已上线 ${formatDuration(done)} / 今日调整目标 ${formatDuration(target)}</div><div class="availability-bar"><span style="width:${pct.toFixed(1)}%"></span></div><div class="availability-sub">${remaining?`当天还差 ${formatDuration(remaining)}。前几天不足的时间已计入今日目标。`:`当天目标已完成${surplus?`，超出 ${formatDuration(surplus)} 会抵扣下一工作日`:'。'}`}</div><div class="availability-sub">本周一至周五累计：${formatDuration(week)} / 16小时</div>`;
+      $('availabilityResult').innerHTML=`<div class="availability-summary">今日 ${formatDuration(done)} / 目标 ${formatDuration(target)}</div><div class="availability-bar"><span style="width:${pct.toFixed(1)}%"></span></div><div class="availability-sub">${remaining?`还差 ${formatDuration(remaining)}`:`已完成${surplus?` · 超出 ${formatDuration(surplus)} 抵扣后续`:''}`}</div><div class="availability-sub">本周 ${formatDuration(week)} / 16小时</div>`;
     }
   }
 
@@ -251,6 +262,17 @@
     setPrefs(prefs);renderProfiles(true);$('profileCompanyName').focus();$('profileCompanyName').select();
   }
 
+  function deleteProfile() {
+    const id=$('profileCompanySelect').value,profile=profiles().find(p=>p.id===id),list=profiles();
+    if(!profile) return;
+    if(list.length<=1) return toast('至少保留一个公司费率');
+    if(!window.confirm(`删除“${profile.name}”的费率设置？已有电话记录会保留，并归入“未分类 / 已归档”。`)) return;
+    const company_profiles=list.filter(p=>p.id!==id),archived_company_names={...(prefs.archived_company_names||{}),[id]:profile.name},deleted_company_ids=[...new Set([...(prefs.deleted_company_ids||[]),id])];
+    const nextId=company_profiles[0].id;
+    setPrefs({...prefs,company_profiles,archived_company_names,deleted_company_ids,active_company:prefs.active_company===id?nextId:prefs.active_company,profile_editor_company:id===prefs.profile_editor_company?nextId:prefs.profile_editor_company});
+    renderProfiles(true);renderJar();toast(`已删除 ${profile.name} 费率，历史电话记录已保留`);
+  }
+
   function recordCall(e) {
     e.preventDefault();e.stopImmediatePropagation();
     const s=app.getState(),data=s.data,minutes=Number($('minutes').value),day=$('workDay').value,fx=Number(data.fx)||4.4;
@@ -278,6 +300,7 @@
       const p=profiles().find(x=>x.id===prefs.profile_editor_company);if(p){$('profileCompanyName').value=p.name;$('rate').value=p.rateUsd;}
     };
     $('addCompanyProfile').onclick=addProfile;
+    $('deleteCompanyProfile').onclick=deleteProfile;
     $('saveSettings').onclick=persistSettings;
     $('callForm').addEventListener('submit',recordCall,true);
     $('minutes').addEventListener('input',()=>{
