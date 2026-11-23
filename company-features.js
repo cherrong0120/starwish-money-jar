@@ -32,7 +32,9 @@
   prefs.active_company = prefs.active_company || prefs.company_profiles[0]?.id || '';
   prefs.profile_editor_company = prefs.profile_editor_company || prefs.company_profiles[0]?.id || '';
   // Keep the call form's selection separately from cloud-driven preference refreshes.
-  let selectedCallCompanyId = prefs.active_company;
+  const CALL_COMPANY_KEY = 'starwish_call_company_selection_v1';
+  let selectedCallCompanyId = (()=>{try{return localStorage.getItem(CALL_COMPANY_KEY)||prefs.active_company;}catch(e){return prefs.active_company;}})();
+  function rememberCallCompany(id){selectedCallCompanyId=id;try{localStorage.setItem(CALL_COMPANY_KEY,id);}catch(e){}}
   let activeFilter = 'all';
   let availabilityMode = 'day';
   let renderedProfileSignature = '';
@@ -261,6 +263,7 @@
     const id='company_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7);
     const p={id,name:`新公司 ${profiles().length+1}`,rateUsd:Number($('rate').value)||.35};
     const company_profiles=[...profiles(),p];
+    rememberCallCompany(id);
     prefs={...prefs,company_profiles,active_company:id,profile_editor_company:id};
     setPrefs(prefs);renderProfiles(true);$('profileCompanyName').focus();$('profileCompanyName').select();
   }
@@ -272,7 +275,7 @@
     if(!window.confirm(`删除“${profile.name}”的费率设置？已有电话记录会保留，并归入“未分类 / 已归档”。`)) return;
     const company_profiles=list.filter(p=>p.id!==id),archived_company_names={...(prefs.archived_company_names||{}),[id]:profile.name},deleted_company_ids=[...new Set([...(prefs.deleted_company_ids||[]),id])];
     const nextId=company_profiles[0].id;
-    if(selectedCallCompanyId===id) selectedCallCompanyId=nextId;
+    if(selectedCallCompanyId===id) rememberCallCompany(nextId);
     setPrefs({...prefs,company_profiles,archived_company_names,deleted_company_ids,active_company:prefs.active_company===id?nextId:prefs.active_company,profile_editor_company:id===prefs.profile_editor_company?nextId:prefs.profile_editor_company});
     renderProfiles(true);renderJar();toast(`已删除 ${profile.name} 费率，历史电话记录已保留`);
   }
@@ -298,7 +301,7 @@
     renderProfiles(true);
     $('showDailyJar').onclick=()=>app.setJarMode('daily');
     $('showMonthlyJar').onclick=()=>app.setJarMode('monthly');
-    $('callCompanyId').onchange=()=>{selectedCallCompanyId=$('callCompanyId').value;prefs.active_company=selectedCallCompanyId;setPrefs(prefs);$('minutes').dispatchEvent(new Event('input'));};
+    $('callCompanyId').onchange=()=>{rememberCallCompany($('callCompanyId').value);prefs.active_company=selectedCallCompanyId;setPrefs(prefs);$('minutes').dispatchEvent(new Event('input'));};
     $('profileCompanySelect').onchange=()=>{
       prefs.profile_editor_company=$('profileCompanySelect').value;
       const p=profiles().find(x=>x.id===prefs.profile_editor_company);if(p){$('profileCompanyName').value=p.name;$('rate').value=p.rateUsd;}
@@ -319,7 +322,7 @@
     $('availabilityDate').value=todayMYT();
     $('availabilityDate').onchange=renderAvailability;
     $('saveAvailability').onclick=saveAvailability;
-    $('records').addEventListener('click',e=>{const b=e.target.closest('[data-edit]');if(!b)return;const c=app.getState().data.calls.find(x=>x.id===b.dataset.edit);if(c&&c.companyId){$('callCompanyId').value=c.companyId;prefs.active_company=c.companyId;}} ,true);
+    $('records').addEventListener('click',e=>{const b=e.target.closest('[data-edit]');if(!b)return;const c=app.getState().data.calls.find(x=>x.id===b.dataset.edit);if(c&&profiles().some(p=>p.id===c.companyId)){rememberCallCompany(c.companyId);$('callCompanyId').value=c.companyId;prefs.active_company=c.companyId;setPrefs(prefs);}} ,true);
     window.starwishEnhanceRender=renderJar;
     window.starwishRefreshCompanyInputs=()=>renderProfiles(true);
     app.render();renderProfiles(true);renderJar();
