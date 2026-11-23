@@ -31,6 +31,8 @@
   prefs.availability.daily = prefs.availability.daily || {};
   prefs.active_company = prefs.active_company || prefs.company_profiles[0]?.id || '';
   prefs.profile_editor_company = prefs.profile_editor_company || prefs.company_profiles[0]?.id || '';
+  // Keep the call form's selection separately from cloud-driven preference refreshes.
+  let selectedCallCompanyId = prefs.active_company;
   let activeFilter = 'all';
   let availabilityMode = 'day';
   let renderedProfileSignature = '';
@@ -133,9 +135,10 @@
     if($('deleteCompanyProfile')) $('deleteCompanyProfile').disabled=list.length<=1;
     const options=list.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} · US$ ${fmt(p.rateUsd)}/分钟</option>`).join('');
     callSelect.innerHTML=options;editSelect.innerHTML=options;
-    if(!list.some(p=>p.id===prefs.active_company)) prefs.active_company=list[0]?.id||'';
+    if(!list.some(p=>p.id===selectedCallCompanyId)) selectedCallCompanyId=prefs.active_company&&list.some(p=>p.id===prefs.active_company)?prefs.active_company:(list[0]?.id||'');
+    if(!list.some(p=>p.id===prefs.active_company)) prefs.active_company=selectedCallCompanyId;
     if(!list.some(p=>p.id===prefs.profile_editor_company)) prefs.profile_editor_company=list[0]?.id||'';
-    if(document.activeElement!==callSelect) callSelect.value=prefs.active_company;
+    if(document.activeElement!==callSelect) callSelect.value=selectedCallCompanyId;
     if(document.activeElement!==editSelect) editSelect.value=prefs.profile_editor_company;
     const editorProfile=list.find(p=>p.id===editSelect.value)||list[0];
     if(editorProfile){if(document.activeElement!==$('profileCompanyName'))$('profileCompanyName').value=editorProfile.name;if(document.activeElement!==$('rate'))$('rate').value=editorProfile.rateUsd;}
@@ -269,6 +272,7 @@
     if(!window.confirm(`删除“${profile.name}”的费率设置？已有电话记录会保留，并归入“未分类 / 已归档”。`)) return;
     const company_profiles=list.filter(p=>p.id!==id),archived_company_names={...(prefs.archived_company_names||{}),[id]:profile.name},deleted_company_ids=[...new Set([...(prefs.deleted_company_ids||[]),id])];
     const nextId=company_profiles[0].id;
+    if(selectedCallCompanyId===id) selectedCallCompanyId=nextId;
     setPrefs({...prefs,company_profiles,archived_company_names,deleted_company_ids,active_company:prefs.active_company===id?nextId:prefs.active_company,profile_editor_company:id===prefs.profile_editor_company?nextId:prefs.profile_editor_company});
     renderProfiles(true);renderJar();toast(`已删除 ${profile.name} 费率，历史电话记录已保留`);
   }
@@ -294,7 +298,7 @@
     renderProfiles(true);
     $('showDailyJar').onclick=()=>app.setJarMode('daily');
     $('showMonthlyJar').onclick=()=>app.setJarMode('monthly');
-    $('callCompanyId').onchange=()=>{prefs.active_company=$('callCompanyId').value;setPrefs(prefs);$('minutes').dispatchEvent(new Event('input'));window.starwishApp.render();window.starwishEnhanceRender();};
+    $('callCompanyId').onchange=()=>{selectedCallCompanyId=$('callCompanyId').value;prefs.active_company=selectedCallCompanyId;setPrefs(prefs);$('minutes').dispatchEvent(new Event('input'));};
     $('profileCompanySelect').onchange=()=>{
       prefs.profile_editor_company=$('profileCompanySelect').value;
       const p=profiles().find(x=>x.id===prefs.profile_editor_company);if(p){$('profileCompanyName').value=p.name;$('rate').value=p.rateUsd;}
