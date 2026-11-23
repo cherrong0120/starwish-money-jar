@@ -5,6 +5,20 @@
   const KEY = 'sb_publishable_SNOLypt36uYzAFx1EYM9_w_Wq5J3HtU';
   const TZ = 'Asia/Kuala_Lumpur';
   const $ = id => document.getElementById(id);
+  const stable = v => Array.isArray(v)?`[${v.map(stable).join(',')}]`:v&&typeof v==='object'?`{${Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stable(v[k])).join(',')}}`:JSON.stringify(v);
+  function mergePreferences(local={},remote={},localDirty=false){
+    const first=localDirty?remote:local,second=localDirty?local:remote;
+    const mergeById=(a=[],b=[])=>{const m=new Map();for(const x of [...a,...b])if(x?.id)m.set(x.id,x);return [...m.values()];};
+    const daily={...(localDirty?(remote.availability?.daily||{}):(local.availability?.daily||{})),...(localDirty?(local.availability?.daily||{}):(remote.availability?.daily||{}))};
+    const out={...local,...remote,...(localDirty?local:{})};
+    out.company_profiles=mergeById(first.company_profiles||[],second.company_profiles||[]);
+    out.call_companies={...(localDirty?(remote.call_companies||{}):(local.call_companies||{})),...(localDirty?(local.call_companies||{}):(remote.call_companies||{}))};
+    out.availability={...(local.availability||{}),...(remote.availability||{}),daily};
+    out.deleted_call_ids=[...new Set([...(local.deleted_call_ids||[]),...(remote.deleted_call_ids||[])])];
+    out.deleted_diary_ids=[...new Set([...(local.deleted_diary_ids||[]),...(remote.deleted_diary_ids||[])])];
+    if(localDirty)out.preferences_dirty=true;else delete out.preferences_dirty;
+    return out;
+  }
   const client = window.supabase.createClient(URL, KEY, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   });
@@ -40,10 +54,10 @@
     const actualDay = hh < 7 ? datePlus(call.day,1) : call.day;
     return new Date(`${actualDay}T${time}:00+08:00`).toISOString();
   }
-  function callFromRow(row) {
+  function callFromRow(row,companyId='') {
     const {day,time}=stampToWorkday(row.call_at);
     const minutes=Number(row.billable_minutes),rate=Number(row.rate_usd),fx=Number(row.exchange_rate);
-    return {id:row.id,day,time,minutes,usd:minutes*rate,rm:minutes*rate*fx,note:row.note||'',created_at:row.created_at,updated_at:row.updated_at};
+    return {id:row.id,day,time,minutes,usd:minutes*rate,rm:minutes*rate*fx,note:row.note||'',companyId,created_at:row.created_at,updated_at:row.updated_at};
   }
   async function allRows(table, columns='*') {
     const out=[];
@@ -59,9 +73,9 @@
     if(error) throw error;
   }
   async function uploadState(state, tombstones) {
-    const calls=[];
+    const calls=[],callCompanies={...(state.preferences.call_companies||{})};
     for(const c of state.data.calls){
-      const id=await idFor(user.id,'call',String(c.id)); c.id=id;
+      const id=await idFor(user.id,'call',String(c.id)); c.id=id;if(c.companyId)callCompanies[id]=c.companyId;
       if(!tombstones.calls.includes(id)) calls.push({id,user_id:user.id,call_at:callAt(c),billable_minutes:c.minutes,rate_usd:c.usd/c.minutes,exchange_rate:c.usd?c.rm/c.usd:state.data.fx,note:c.note||'',created_at:c.created_at||callAt(c),updated_at:c.updated_at||new Date().toISOString()});
     }
     const diaries=[];
@@ -73,7 +87,7 @@
     if(diaries.length){const {error}=await client.from('starwish_diary').upsert(diaries,{onConflict:'id'});if(error)throw error;}
     const settings={user_id:user.id,rate_usd:state.data.rate,exchange_rate:state.data.fx,timezone:TZ,workday_reset_hour:7,updated_at:state.data.updated_at||new Date().toISOString()};
     const {error:se}=await client.from('starwish_settings').upsert(settings,{onConflict:'user_id'});if(se)throw se;
-    await savePrefs({...state.preferences,deleted_call_ids:tombstones.calls,deleted_diary_ids:tombstones.diaries,calendar_month:state.month},state.view);
+    const savedPreferences={...state.preferences};delete savedPreferences.preferences_dirty;await savePrefs({...savedPreferences,call_companies:callCompanies,deleted_call_ids:tombstones.calls,deleted_diary_ids:tombstones.diaries,calendar_month:state.month},state.view);
   }
   async function syncNow(isInitial=false,pullOnly=false) {
     if(!user)return;
@@ -92,7 +106,9 @@
       const pendingDiaries=await Promise.all((pending.diaries||[]).map(id=>idFor(user.id,'diary',String(id))));
       const tomb={calls:[...new Set([...(meta.deleted_call_ids||[]),...(remotePrefs.deleted_call_ids||[]),...pendingCalls])],diaries:[...new Set([...(meta.deleted_diary_ids||[]),...(remotePrefs.deleted_diary_ids||[]),...pendingDiaries])]};
       const state=window.starwishApp.getState();
-      const remoteCalls=callRows.filter(r=>!tomb.calls.includes(r.id)).map(callFromRow);
+      const localPreferencesDirty=!!state.preferences.preferences_dirty;
+      const effectivePreferences=mergePreferences(state.preferences,remotePrefs,localPreferencesDirty);
+      const callCompanies=effectivePreferences.call_companies||{};const remoteCalls=callRows.filter(r=>!tomb.calls.includes(r.id)).map(r=>callFromRow(r,callCompanies[r.id]||''));
       const remoteDiaries=diaryRows.filter(r=>!tomb.diaries.includes(r.id)).map(r=>({id:r.id,at:Date.parse(r.created_at)||Date.now(),entryDay:r.entry_date,kind:r.category,note:r.content,updated_at:r.updated_at}));
       const cm=new Map(remoteCalls.map(x=>[x.id,x]));
       for(const c of state.data.calls){const id=await idFor(user.id,'call',String(c.id)),remote=cm.get(id);if(!tomb.calls.includes(id)&&(!remote||Date.parse(c.updated_at||0)>Date.parse(remote.updated_at||0)))cm.set(id,{...c,id});}
@@ -106,15 +122,17 @@
       const localSettingsNewer=localSettingsDirty||(state.data.updated_at&&settings?.updated_at&&Date.parse(state.data.updated_at)>Date.parse(settings.updated_at));
       if(localChangeVersion!==syncVersion){syncQueued=true;return;}
       const nextRate=localSettingsNewer||!settings?state.data.rate:Number(settings.rate_usd),nextFx=localSettingsNewer||!settings?state.data.fx:Number(settings.exchange_rate);
-      const sameCalls=mergedCalls.length===state.data.calls.length&&mergedCalls.every(c=>{const x=state.data.calls.find(y=>y.id===c.id);return x&&['day','time','minutes','usd','rm','note','updated_at'].every(k=>String(x[k]??'')===String(c[k]??''));});
+      const sameCalls=mergedCalls.length===state.data.calls.length&&mergedCalls.every(c=>{const x=state.data.calls.find(y=>y.id===c.id);return x&&['day','time','minutes','usd','rm','note','companyId','updated_at'].every(k=>String(x[k]??'')===String(c[k]??''));});
       const sameDiaries=mergedDiaries.length===state.diaries.length&&mergedDiaries.every(d=>{const x=state.diaries.find(y=>y.id===d.id);return x&&['entryDay','kind','note','updated_at'].every(k=>String(x[k]??'')===String(d[k]??''));});
-      const nextView=prefsResp.data?.preferred_view||state.view,nextMonth=remotePrefs.calendar_month||state.month;
-      if(pullOnly&&sameCalls&&sameDiaries&&Number(nextRate)===Number(state.data.rate)&&Number(nextFx)===Number(state.data.fx)&&nextView===state.view&&nextMonth===state.month){window.starwishApp.setCloudPreferences(remotePrefs);return;}
-      window.starwishApp.applyCloudState({calls:mergedCalls,diaries:mergedDiaries,rate:nextRate,fx:nextFx,settingsUpdatedAt:localSettingsNewer?state.data.updated_at:settings?.updated_at,settingsDirty:localSettingsDirty,preferences:remotePrefs,view:nextView,month:nextMonth});
+      const nextView=state.view,nextMonth=state.month;
+      const sameCompanyPreferences=['company_profiles','availability','call_companies','active_company'].every(k=>stable(effectivePreferences[k]??null)===stable(state.preferences[k]??null));
+      if(pullOnly&&sameCalls&&sameDiaries&&Number(nextRate)===Number(state.data.rate)&&Number(nextFx)===Number(state.data.fx)&&sameCompanyPreferences&&nextView===state.view&&nextMonth===state.month){window.starwishApp.setCloudPreferences(effectivePreferences);return;}
+      window.starwishApp.applyCloudState({calls:mergedCalls,diaries:mergedDiaries,rate:nextRate,fx:nextFx,settingsUpdatedAt:localSettingsNewer?state.data.updated_at:settings?.updated_at,settingsDirty:localSettingsDirty,preferences:effectivePreferences,view:nextView,month:nextMonth});
       if(!pullOnly){
         await uploadState(window.starwishApp.getState(),tomb);
         // Clear the dirty marker only if no newer local change happened while uploading.
         if(localSettingsDirty&&localChangeVersion===syncVersion)window.starwishApp.markSettingsSynced();
+        if(localPreferencesDirty&&localChangeVersion===syncVersion)window.starwishApp.markPreferencesSynced();
         writeMeta({...tomb,migrated:true,last_sync:new Date().toISOString()});
         localStorage.removeItem('starwish_pending_deletes');
         status(`已同步到云端 · ${user.email}`); lastSyncError='';
