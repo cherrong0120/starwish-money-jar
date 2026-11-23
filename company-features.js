@@ -140,7 +140,9 @@
     if(!list.some(p=>p.id===selectedCallCompanyId)) selectedCallCompanyId=prefs.active_company&&list.some(p=>p.id===prefs.active_company)?prefs.active_company:(list[0]?.id||'');
     if(!list.some(p=>p.id===prefs.active_company)) prefs.active_company=selectedCallCompanyId;
     if(!list.some(p=>p.id===prefs.profile_editor_company)) prefs.profile_editor_company=list[0]?.id||'';
-    if(document.activeElement!==callSelect) callSelect.value=selectedCallCompanyId;
+    // Rebuilding option elements resets a focused <select> to its first option;
+    // always restore the intended value after replacing its options.
+    callSelect.value=selectedCallCompanyId;
     if(document.activeElement!==editSelect) editSelect.value=prefs.profile_editor_company;
     const editorProfile=list.find(p=>p.id===editSelect.value)||list[0];
     if(editorProfile){if(document.activeElement!==$('profileCompanyName'))$('profileCompanyName').value=editorProfile.name;if(document.activeElement!==$('rate'))$('rate').value=editorProfile.rateUsd;}
