@@ -96,6 +96,7 @@
     .day{position:relative}.day .diary-mark{position:absolute;right:2px;top:2px;border-radius:10px;background:#f4d6e7;color:#94517f;padding:1px 4px;font-size:9px;line-height:1.25;font-style:normal}
     .diary-date-scope{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0;padding:10px 12px;background:#fff2f8;border:1px solid #f0d9e7;border-radius:12px;color:#8e587b;font-size:13px}
     .monthly-coin-pagination{display:flex;justify-content:center;align-items:center;gap:10px;margin:12px 0;color:#8e587b;font-size:13px;font-weight:750}.monthly-coin-pagination .btn{padding:8px 12px}
+    .diary-item-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}.diary-item-actions .btn{padding:8px 12px}
     @media(max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}.wrap{padding-left:18px;padding-right:18px}}
     @media(max-width:520px){.availability-box{padding:13px}.company-filter{margin-left:-3px;margin-right:-3px}}
   `;
