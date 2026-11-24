@@ -95,6 +95,7 @@
     .availability-panel{margin-top:18px}
     .day{position:relative}.day .diary-mark{position:absolute;right:2px;top:2px;border-radius:10px;background:#f4d6e7;color:#94517f;padding:1px 4px;font-size:9px;line-height:1.25;font-style:normal}
     .diary-date-scope{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0;padding:10px 12px;background:#fff2f8;border:1px solid #f0d9e7;border-radius:12px;color:#8e587b;font-size:13px}
+    .monthly-coin-pagination{display:flex;justify-content:center;align-items:center;gap:10px;margin:12px 0;color:#8e587b;font-size:13px;font-weight:750}.monthly-coin-pagination .btn{padding:8px 12px}
     @media(max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}.wrap{padding-left:18px;padding-right:18px}}
     @media(max-width:520px){.availability-box{padding:13px}.company-filter{margin-left:-3px;margin-right:-3px}}
   `;
@@ -170,6 +171,15 @@
     return {rm:calls.reduce((a,c)=>a+Number(c.rm||0),0),usd:calls.reduce((a,c)=>a+Number(c.usd||0),0),minutes:calls.reduce((a,c)=>a+Number(c.minutes||0),0),count:calls.length};
   }
 
+  function renderMonthlyCoinPagination(totalRm,monthly) {
+    const box=$('monthlyCoinPagination');if(!box)return;
+    const totalCoins=Math.floor((Number(totalRm||0)+1e-7)/50),pageSize=app.getMonthlyCoinPageSize(),pageCount=Math.max(1,Math.ceil(totalCoins/pageSize));
+    const page=Math.min(app.getMonthlyCoinPage(),pageCount-1);app.setMonthlyCoinPage(page);
+    box.classList.toggle('hidden',!monthly||pageCount<=1);
+    $('monthlyCoinPageLabel').textContent=`第 ${page+1} / ${pageCount} 页 · 金币 ${page*pageSize+1}–${Math.min((page+1)*pageSize,totalCoins)} 枚`;
+    $('monthlyCoinPrev').disabled=page<=0;$('monthlyCoinNext').disabled=page>=pageCount-1;
+  }
+
   function renderJar() {
     if(!$('companyFilter')) return;
     const s=app.getState();prefs=s.preferences||prefs;
@@ -188,17 +198,18 @@
     $('dayMinutes').textContent=formatDuration(sum.minutes)+' 通话时长';
     $('listDate').textContent=monthly?s.month:s.selected;
     $('workDay').value=s.selected;
+    renderMonthlyCoinPagination(sum.rm,monthly);
     app.refreshJar(sum.rm);
     const label=$('jarScene')||document.querySelector('#dailyJarPanel .jar-scene');
     if(label) label.setAttribute('aria-label',monthly?'月度爱心金币存钱罐':'每日爱心金币存钱罐');
     const eyebrow=document.querySelector('#dailyJarPanel .jar-eyebrow');
     if(eyebrow) eyebrow.textContent=monthly?'MONTHLY LITTLE TREASURE':"TODAY'S LITTLE TREASURE";
-    if(monthly){$('jarStatus').textContent=sum.rm>=20?'本月的爱心金币正在闪闪发光 ✨':'本月的宝藏正在等待你 ✨';$('jarHint').textContent='本月每累计 RM20，就点亮一枚爱心金币';}
+    if(monthly){$('jarStatus').textContent=sum.rm>=50?'本月的爱心金币正在闪闪发光 ✨':'本月的宝藏正在等待你 ✨';$('jarHint').textContent=`每累计 RM50 点亮一枚 · 下一枚还差 RM ${fmt(Math.max(0,50-(sum.rm%50)))}`;}
     else $('jarHint').textContent='每赚 RM20，就点亮一枚爱心金币';
     const note=document.querySelector('#dailyJarPanel>.sectionnote');
-    if(note) note.textContent=monthly?'✨ 每累计 RM20，点亮一枚月度爱心金币。整月沿用每日存钱罐的金币、摇晃和点亮册。':'✨ 每满 RM20，点亮一枚爱心金币。每天早上 7 点开启新罐子，旧日成果保留在日历。';
+    if(note) note.textContent=monthly?'✨ 每累计 RM50 点亮一枚月度爱心金币；可翻页查看全部金币。':'✨ 每满 RM20，点亮一枚爱心金币。每天早上 7 点开启新罐子，旧日成果保留在日历。';
     const count=$('jarLitCount');
-    if(count) count.textContent=Math.floor((sum.rm+1e-7)/20)+' 枚已点亮';
+    if(count) count.textContent=Math.floor((sum.rm+1e-7)/(monthly?50:20))+' 枚已点亮';
     renderProfiles();
     renderAvailability();
   }
@@ -305,6 +316,8 @@
     renderProfiles(true);
     $('showDailyJar').onclick=()=>app.setJarMode('daily');
     $('showMonthlyJar').onclick=()=>app.setJarMode('monthly');
+    $('monthlyCoinPrev').onclick=()=>{app.setMonthlyCoinPage(app.getMonthlyCoinPage()-1);renderJar();};
+    $('monthlyCoinNext').onclick=()=>{app.setMonthlyCoinPage(app.getMonthlyCoinPage()+1);renderJar();};
     $('callCompanyId').onchange=()=>{rememberCallCompany($('callCompanyId').value);prefs.active_company=selectedCallCompanyId;setPrefs(prefs);$('minutes').dispatchEvent(new Event('input'));};
     $('profileCompanySelect').onchange=()=>{
       prefs.profile_editor_company=$('profileCompanySelect').value;
