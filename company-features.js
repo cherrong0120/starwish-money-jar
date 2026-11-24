@@ -171,13 +171,13 @@
     return {rm:calls.reduce((a,c)=>a+Number(c.rm||0),0),usd:calls.reduce((a,c)=>a+Number(c.usd||0),0),minutes:calls.reduce((a,c)=>a+Number(c.minutes||0),0),count:calls.length};
   }
 
-  function renderMonthlyCoinPagination(totalRm,monthly) {
-    const box=$('monthlyCoinPagination');if(!box)return;
-    const totalCoins=Math.floor((Number(totalRm||0)+1e-7)/50),pageSize=app.getMonthlyCoinPageSize(),pageCount=Math.max(1,Math.ceil(totalCoins/pageSize));
-    const page=Math.min(app.getMonthlyCoinPage(),pageCount-1);app.setMonthlyCoinPage(page);
-    box.classList.toggle('hidden',!monthly||pageCount<=1);
-    $('monthlyCoinPageLabel').textContent=`第 ${page+1} / ${pageCount} 页 · 金币 ${page*pageSize+1}–${Math.min((page+1)*pageSize,totalCoins)} 枚`;
-    $('monthlyCoinPrev').disabled=page<=0;$('monthlyCoinNext').disabled=page>=pageCount-1;
+  function renderCoinPagination(totalRm,monthly) {
+    const box=$('coinPagination');if(!box)return;
+    const coinValue=monthly?50:20,totalCoins=Math.floor((Number(totalRm||0)+1e-7)/coinValue),pageSize=app.getCoinPageSize(),pageCount=Math.max(1,Math.ceil(totalCoins/pageSize));
+    const page=Math.min(app.getCoinPage(),pageCount-1);app.setCoinPage(page);
+    box.classList.toggle('hidden',pageCount<=1);
+    $('coinPageLabel').textContent=`${monthly?'月度':'每日'} · 第 ${page+1} / ${pageCount} 页 · 金币 ${page*pageSize+1}–${Math.min((page+1)*pageSize,totalCoins)} 枚`;
+    $('coinPrev').disabled=page<=0;$('coinNext').disabled=page>=pageCount-1;
   }
 
   function renderJar() {
@@ -198,7 +198,7 @@
     $('dayMinutes').textContent=formatDuration(sum.minutes)+' 通话时长';
     $('listDate').textContent=monthly?s.month:s.selected;
     $('workDay').value=s.selected;
-    renderMonthlyCoinPagination(sum.rm,monthly);
+    renderCoinPagination(sum.rm,monthly);
     app.refreshJar(sum.rm);
     const label=$('jarScene')||document.querySelector('#dailyJarPanel .jar-scene');
     if(label) label.setAttribute('aria-label',monthly?'月度爱心金币存钱罐':'每日爱心金币存钱罐');
@@ -316,8 +316,8 @@
     renderProfiles(true);
     $('showDailyJar').onclick=()=>app.setJarMode('daily');
     $('showMonthlyJar').onclick=()=>app.setJarMode('monthly');
-    $('monthlyCoinPrev').onclick=()=>{app.setMonthlyCoinPage(app.getMonthlyCoinPage()-1);renderJar();};
-    $('monthlyCoinNext').onclick=()=>{app.setMonthlyCoinPage(app.getMonthlyCoinPage()+1);renderJar();};
+    $('coinPrev').onclick=()=>{app.setCoinPage(app.getCoinPage()-1);renderJar();};
+    $('coinNext').onclick=()=>{app.setCoinPage(app.getCoinPage()+1);renderJar();};
     $('callCompanyId').onchange=()=>{rememberCallCompany($('callCompanyId').value);prefs.active_company=selectedCallCompanyId;setPrefs(prefs);$('minutes').dispatchEvent(new Event('input'));};
     $('profileCompanySelect').onchange=()=>{
       prefs.profile_editor_company=$('profileCompanySelect').value;
